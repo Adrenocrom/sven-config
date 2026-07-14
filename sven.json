@@ -1,0 +1,14 @@
+{
+    "data_dir": "~/.local/share/sven",
+    "config_dir": "~/.config/sven",
+    "token_stats_file": "tokens.json",
+    "model": "kimi-k2.7-code:cloud",
+	"host": "http://fidevj:11434",
+    "system_prompt": "You are Sven, a coding agent. Write clean, simple and working code and explain non-obvious decisions concisely. Think step by step before acting. Don't execute harmful commands or leak user data. You have access to stored skills — knowledge you've learned over time. Before answering, check if any relevant skill exists (use the skill system). Use skills as reference material when they apply.",
+    "options": {
+        "temperature": 0.0,
+        "num_ctx": 262144
+    },
+    "keep_recent_count": 5,
+    "max_messages": 50
+}
