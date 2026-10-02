@@ -61,3 +61,26 @@ fn rand(&mut self) -> u32 {
 - Multiball: clone a live ball and rotate its velocity vector ±25° (`dx' = dx·cos a − dy·sin a`, `dy' = dx·sin a + dy·cos a`) — rotation preserves speed, so paddle bounce math stays consistent.
 - Life is lost only when the **last** ball falls off (`balls.iter().all(|b| b.is_none())`), not per ball.
 - Reset transient effects (paddle size, drops) on life loss and level clear; carry score/lives across levels.
+
+## Main menu / difficulty selection (verified in a UEFI breakout game)
+
+### Menu as a game phase
+Add `Phase::Menu` as the initial state; the game struct holds `menu_sel: usize`, `cursor_x/cursor_y: f32` and `quit: bool`. Entries are a const table pairing a label with an action payload:
+```rust
+const MENU_ITEMS: [(&str, Option<Difficulty>); 4] = [
+    ("SIMPLE - 10 LIVES - BIG BAR", Some(Difficulty::Simple)),
+    ("NORMAL - 5 LIVES", Some(Difficulty::Normal)),
+    ("HARD - 3 LIVES - SMALL BAR", Some(Difficulty::Hard)),
+    ("QUIT", None),
+];
+```
+`primary_action()` (the shared click/space handler) dispatches on phase: menu → start game or set `quit`; game over → back to menu (keeps last selection highlighted). ESC in-game → menu; ESC in menu → quit. `wants_quit()` is polled by the main loop.
+
+### Mouse needs both axes for menus
+Gameplay only tracks x, but menus need y. Extend the pointer abstraction to return `(Option<(x, y)>, rel_dx, rel_dy, clicked)`; for `AbsolutePointer` scale both axes from `mode().absolute_min/max_x/y` (fall back to /32767 if the range is degenerate). Keep a **virtual cursor** (accumulated from relative deltas) and **draw it as a small dot** in the menu — with a PS/2 mouse the position is otherwise invisible and hover is guesswork.
+
+### Input ordering pitfall
+Process the click **after** `game.update()` in the frame: update refreshes the hover highlight from the current cursor position, so a fast move+click in the same frame still activates the intended entry. Clicking before updating can act on a stale selection.
+
+### Difficulty presets
+Store the chosen `Difficulty` in the game struct; derive lives and base paddle width from it (`fn lives(self)`, `fn paddle_w(self)`). Reset paddle width to `self.difficulty.paddle_w()` (not a global constant) on life loss and level clear, so collectible effects reset to the *chosen* base size. Arrow UP/DOWN move the menu selection only in the menu phase — do not fall back to paddle movement (UP≠LEFT).
