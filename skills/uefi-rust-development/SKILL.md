@@ -12,6 +12,20 @@ tags:
 created_at: '2026-10-01T21:24:26.767329059+02:00'
 ---
 
+---
+name: uefi_rust_development
+description: 'How to write UEFI apps in Rust (uefi crate): custom target, console I/O via system::with_stdin, keyboard input incl. held-key emulation via countdown arrays, timer events for frame pacing, GOP double buffering, stall/reset, boot vs runtime services.'
+tags:
+- rust
+- uefi
+- keyboard-input
+- timer-events
+- double-buffering
+- gop
+- no-std-math
+created_at: '2026-10-01T21:24:26.767329059+02:00'
+---
+
 ## Other boot/runtime helpers
 - `uefi::boot::stall(Duration)` — busy-wait pause (avoid for frame pacing; use timer events). `Duration::new(secs, nanos)` or `from_millis`.
 - `uefi::boot::close_event(event)` — takes `Event` by value (not `Copy`); only close events you created.
@@ -81,6 +95,18 @@ Gameplay only tracks x, but menus need y. Extend the pointer abstraction to retu
 
 ### Input ordering pitfall
 Process the click **after** `game.update()` in the frame: update refreshes the hover highlight from the current cursor position, so a fast move+click in the same frame still activates the intended entry. Clicking before updating can act on a stale selection.
+
+### Hover vs. keyboard selection conflict (classic menu bug)
+If hover re-selects an entry **every frame**, arrow-key selection appears dead: the key handler changes `menu_sel`, but the next frame's update snaps it back — and since rendering happens after update, the change is never even drawn. Worst case: the virtual cursor starts at the screen center, which is exactly inside an entry's hit box, so the menu is permanently stuck on that entry.
+Fix — hover only takes over while the cursor actually moves (last input wins):
+```rust
+let moved = (mouse_x - self.cursor_x).abs() > 0.5 || (mouse_y - self.cursor_y).abs() > 0.5;
+self.cursor_x = mouse_x; self.cursor_y = mouse_y;
+if moved {
+    if let Some(i) = self.menu_hit(mouse_x, mouse_y) { self.menu_sel = i; }
+}
+```
+Also gate LEFT/RIGHT paddle steering on `!game.in_menu()` — otherwise held arrow keys push the cursor dot around and fight the UP/DOWN selection.
 
 ### Difficulty presets
 Store the chosen `Difficulty` in the game struct; derive lives and base paddle width from it (`fn lives(self)`, `fn paddle_w(self)`). Reset paddle width to `self.difficulty.paddle_w()` (not a global constant) on life loss and level clear, so collectible effects reset to the *chosen* base size. Arrow UP/DOWN move the menu selection only in the menu phase — do not fall back to paddle movement (UP≠LEFT).
