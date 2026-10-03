@@ -12,20 +12,6 @@ tags:
 created_at: '2026-10-01T21:24:26.767329059+02:00'
 ---
 
----
-name: uefi_rust_development
-description: 'How to write UEFI apps in Rust (uefi crate): custom target, console I/O via system::with_stdin, keyboard input incl. held-key emulation via countdown arrays, timer events for frame pacing, GOP double buffering, stall/reset, boot vs runtime services.'
-tags:
-- rust
-- uefi
-- keyboard-input
-- timer-events
-- double-buffering
-- gop
-- no-std-math
-created_at: '2026-10-01T21:24:26.767329059+02:00'
----
-
 ## Other boot/runtime helpers
 - `uefi::boot::stall(Duration)` — busy-wait pause (avoid for frame pacing; use timer events). `Duration::new(secs, nanos)` or `from_millis`.
 - `uefi::boot::close_event(event)` — takes `Event` by value (not `Copy`); only close events you created.
@@ -76,6 +62,30 @@ fn rand(&mut self) -> u32 {
 - Life is lost only when the **last** ball falls off (`balls.iter().all(|b| b.is_none())`), not per ball.
 - Reset transient effects (paddle size, drops) on life loss and level clear; carry score/lives across levels.
 
+### Paddle collision: crossing check, not overlap (fixes the "climbing ball" bug)
+A naive AABB overlap + `ball.y = paddle_top - BALL_R` snap makes a ball arriving steeply from the side teleport *up* onto the paddle top and visibly climb it. Distinguish top hits from side entries by whether the bottom edge **crossed** the paddle top during this frame's move (position was already updated, so `bottom - dy` is the pre-move edge):
+```rust
+let bottom = ball.y + BALL_R;
+if bottom >= paddle_top && bottom - ball.dy <= paddle_top {
+    // top hit: snap up, bounce angle from hit offset
+    ball.y = paddle_top - BALL_R;
+    let hit = ((ball.x - paddle_x) / half_w).clamp(-0.95, 0.95);
+    let angle = hit * 60.0_f32.to_radians();
+    ball.dx = BALL_SPEED * math::sin(angle);
+    ball.dy = -BALL_SPEED * math::cos(angle);
+} else if bottom > paddle_top && bottom <= paddle_top + PADDLE_H {
+    // side entry: reflect dx away from the paddle center; nudge a zero-dx
+    // ball so it cannot fall straight through the paddle's side
+    let min_dx = BALL_SPEED * 0.2;
+    ball.dx = if ball.x < paddle_x { -ball.dx.abs().max(min_dx) } else { ball.dx.abs().max(min_dx) };
+}
+// below the paddle entirely: no branch fires, ball is lost (correct for breakout)
+```
+Gate the whole block on `ball.dy > 0.0` and the x-range; a ball below `paddle_top + PADDLE_H` must NOT re-collide.
+
+### Minimum display size guard
+Compute the playfield's hard minimum from the layout, not a guess: grid width = `COLS * (BRICK_W + GAP) - GAP` (e.g. 10×(64+6)−6 = 694 px). On narrower screens the outer brick columns render off-screen (drawing clips) and can never be hit — the level becomes unclearable. Reject the mode (`Status::UNSUPPORTED`) below that width; check height similarly (grid bottom + paddle zone + menu footer).
+
 ## Main menu / difficulty selection (verified in a UEFI breakout game)
 
 ### Menu as a game phase
@@ -109,4 +119,9 @@ if moved {
 Also gate LEFT/RIGHT paddle steering on `!game.in_menu()` — otherwise held arrow keys push the cursor dot around and fight the UP/DOWN selection.
 
 ### Difficulty presets
-Store the chosen `Difficulty` in the game struct; derive lives and base paddle width from it (`fn lives(self)`, `fn paddle_w(self)`). Reset paddle width to `self.difficulty.paddle_w()` (not a global constant) on life loss and level clear, so collectible effects reset to the *chosen* base size. Arrow UP/DOWN move the menu selection only in the menu phase — do not fall back to paddle movement (UP≠LEFT).
+Store the chosen `Difficulty` in the game struct; derive lives and base paddle width from it (`fn lives(self)`, `fn paddle_w(self)`). Reset paddle width to `self.difficulty.paddle_w()` (not a global constant) on life loss and level clear, so collectible effects reset to the *chosen* base size. Arrow UP/DOWN move the menu selection only in the menu phase — do not fall back to paddle movement (UP≠LEFT). Menu navigation methods should return `()` — nothing needs the "did the selection change" result.
+
+## QEMU/OVMF testing notes
+- Modern form for an absolute-pointer device: `-usb -device usb-tablet`. The legacy `-usbdevice tablet` still works but is old-style CLI (only its `audio`/`ccid` variants were formally removed, in QEMU 6.0).
+- OVMF path varies by distro: Arch `/usr/share/edk2/x64/OVMF.4m.fd`, Debian/Ubuntu `/usr/share/OVMF/OVMF_CODE.fd` — make it overridable (`OVMF="${OVMF:-default}"`).
+- Build/pack scripts: `set -euo pipefail` with sequential commands; don't rely on `cmd && if [ ... ]` chains (a skipped `if` returns 0, masking intent).
