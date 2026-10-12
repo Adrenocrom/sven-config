@@ -1,7 +1,6 @@
 ---
 name: neovim_plugin_development
-description: Guide for writing Neovim plugins using Lua, including structure, loading
-  mechanism, and best practices
+description: Guide for writing Neovim plugins using Lua, including structure, loading mechanism, and best practices
 tags:
 - neovim
 - lua
@@ -47,7 +46,7 @@ function M.init()
     vim.api.nvim_create_user_command('HelloPlugin', function()
         print("Hello from my plugin!")
     end, {
-        desc = 'Prints hello message'
+        desc = 'Prints a message!'
     })
     
     -- Or set up keymaps
@@ -90,7 +89,7 @@ end, {
 vim.api.nvim_create_autocmd('BufReadPost', {
     callback = function(args)
         local buf = args.buf
-        -- do something with buffer
+        -- do something with buf
     end
 })
 ```
@@ -103,6 +102,36 @@ vim.api.nvim_create_autocmd('BufReadPost', {
 4. **Handle cleanup** - Use `vim.api.nvim_create_autocmd` with proper patterns
 5. **Use vim.keymap.set** instead of `nnoremap` (Neovim 0.7+)
 6. **Check for dependencies** - Verify API availability before using new features
+
+## Single-Session Reuse Pattern (buffer + job plugins)
+
+For plugins that spawn a buffer/window/background job (e.g. terminal-like chat UIs),
+users often expect the command to *reuse* an existing instance instead of opening
+a new one every time. Pattern:
+
+```lua
+M.state = nil  -- { buf, win, job_id, append, ... }
+
+local function open(...)
+    local state = M.state
+    if state and vim.api.nvim_buf_is_valid(state.buf) then
+        -- reuse: focus existing window (or re-open one for the buffer),
+        -- send new prompt to the running job; restart job if it exited
+        return
+    end
+    -- else create buffer/window/job from scratch, store in M.state
+end
+```
+
+Key points:
+- Keep all per-session data (job_id, closures like append/send) in one `state`
+  table stored on the module, not as scattered local upvalues — otherwise the
+  reuse path can't reach them.
+- `bufhidden = 'wipe'` + a `BufWipeout` autocmd clears `M.state` on close, so a
+  closed session never lingers. Guard with `if M.state == state then M.state = nil end`.
+- On reuse, check `job_id > 0` to decide between `chansend` (continue conversation)
+  and `jobstart` (restart in same buffer).
+- Buffer-local keymaps (`{ buffer = buf }`) die with the buffer, so no manual cleanup.
 
 ## Documentation (vimdoc)
 
@@ -121,7 +150,7 @@ This plugin does something useful.
 COMMANDS                                        *my_plugin-commands*
 
 :HelloPlugin                                    *:HelloPlugin*
-    Prints a hello message.
+    Prints a message.
 ```
 
 Then run `:helptags doc/` to generate tags.
@@ -132,4 +161,3 @@ Then run `:helptags doc/` to generate tags.
 2. Restart Neovim
 3. Test commands with `:HelloPlugin`
 4. Check for errors with `:messages`
-
